@@ -94,7 +94,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
 
 #define PREPARE_BUF_MAX_SIZE 1024
 
-static char test_device_name[ESP_BLE_ADV_NAME_LEN_MAX] = "THROUGHPUT_DEMO";
+static char test_device_name[ESP_BLE_ADV_NAME_LEN_MAX] = "NeuroNap-LE-0AF2-B";
 static uint8_t char1_str[] = {0x11,0x22,0x33};
 static esp_gatt_char_prop_t a_property = 0;
 
@@ -755,7 +755,8 @@ void app_main(void)
     ESP_ERROR_CHECK( ret );
 
     #if CONFIG_EXAMPLE_CI_PIPELINE_ID
-    memcpy(test_device_name, esp_bluedroid_get_example_name(), ESP_BLE_ADV_NAME_LEN_MAX);
+    // Keep custom device name - comment out to prevent overriding
+    // memcpy(test_device_name, esp_bluedroid_get_example_name(), ESP_BLE_ADV_NAME_LEN_MAX);
     #endif
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));

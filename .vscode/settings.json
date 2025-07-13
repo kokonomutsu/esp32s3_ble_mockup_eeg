@@ -1,0 +1,21 @@
+{
+  "idf.espIdfPath": "/Users/hdang/esp/esp-idf",
+  "idf.toolsPath": "/Users/hdang/.espressif",
+  "idf.pythonInstallPath": "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+  "idf.flashType": "UART",
+  "idf.monitorPort": "/dev/tty.usbmodem59590731751",
+  "idf.port": "/dev/tty.usbmodem59590731751",
+  "idf.openOcdConfigs": [
+    "interface/ftdi/esp_ftdi.cfg",
+    "target/esp32s3.cfg"
+  ],
+  "idf.customExtraVars": {
+    "IDF_TARGET": "esp32s3"
+  },
+  "clangd.path": "/Users/hdang/.espressif/tools/esp-clang/esp-18.1.2_20240912/esp-clang/bin/clangd",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=/Users/hdang/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc",
+    "--compile-commands-dir=/Users/hdang/Private/esp32s3_mockup_eeg/build"
+  ]
+}

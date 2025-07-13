@@ -58,6 +58,13 @@ static uint16_t uPayloadSize = 0;
 static uint16_t uMsgIdx = 0;
 static uint16_t tempIndex = 0;
 
+/* Throughput calculation variables for NOTIFY mode */
+static uint64_t notify_start_time = 0;
+static uint64_t notify_current_time = 0;
+static uint64_t notify_sent_packages = 0;
+static uint64_t notify_sent_bytes = 0;
+static bool notify_throughput_started = false;
+
 #endif /* #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT) */
 
 #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)
@@ -481,6 +488,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(GATTS_TAG, "MTU exchange, MTU %d", param->mtu.mtu);
         is_connect = true;
+        
+#if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
+        ESP_LOGI(GATTS_TAG, "NOTIFY throughput benchmark starting - Package size: %d bytes", GATTS_NOTIFY_LEN);
+        ESP_LOGI(GATTS_TAG, "Expected bitrate for 400 packages/s: 512 kbps (64 KB/s)");
+#endif
         break;
     case ESP_GATTS_UNREG_EVT:
         break;
@@ -550,6 +562,17 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         is_connect = false;
         ESP_LOGI(GATTS_TAG, "Disconnected, remote "ESP_BD_ADDR_STR", reason 0x%02x",
                  ESP_BD_ADDR_HEX(param->disconnect.remote_bda), param->disconnect.reason);
+        
+#if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
+        /* Reset notify throughput variables for next connection */
+        notify_throughput_started = false;
+        notify_start_time = 0;
+        notify_sent_packages = 0;
+        notify_sent_bytes = 0;
+        uMsgIdx = 0;
+        ESP_LOGI(GATTS_TAG, "NOTIFY throughput variables reset for next connection");
+#endif
+        
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CONF_EVT:
@@ -631,9 +654,26 @@ void throughput_server_task(void *param)
                         memcpy(&bSPPZipSingleFrameFull[4], "---012345678901234567890123456789012345678901234567890123456789 We start test thoughput mode perfomance missing package happen or not? 987654321098765432109876543210987654321098765432109876543210---\r\n", uPayloadSize);
                         tempIndex = 4 + uPayloadSize; // 4 bytes for index + payload size
                         
+                        /* Start throughput measurement on first package */
+                        if (!notify_throughput_started) {
+                            notify_start_time = esp_timer_get_time();
+                            notify_throughput_started = true;
+                            ESP_LOGI(GATTS_TAG, "NOTIFY throughput measurement started");
+                        }
+                        
                         esp_ble_gatts_send_indicate(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id,
                                                     gl_profile_tab[PROFILE_A_APP_ID].char_handle,
                                                     tempIndex, bSPPZipSingleFrameFull, false);
+                        
+                        /* Track sent packages and bytes */
+                        notify_sent_packages++;
+                        notify_sent_bytes += tempIndex;
+                        
+                        /* Log every 100 packages for debugging */
+                        if (notify_sent_packages % 100 == 0) {
+                            ESP_LOGI(GATTS_TAG, "Sent package #%" PRIu64 ", index: %d, size: %d bytes", 
+                                     notify_sent_packages, uMsgIdx, tempIndex);
+                        }
                     }
                 } else { //Add the vTaskDelay to prevent this task from consuming the CPU all the time, causing low-priority tasks to not be executed at all.
                     vTaskDelay( 10 / portTICK_PERIOD_MS );
@@ -665,6 +705,42 @@ void throughput_cal_task(void *param)
 
 }
 #endif /* #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT) */
+
+#if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
+void notify_bitrate_calc_task(void *param)
+{
+    while (1)
+    {
+        uint32_t bit_rate = 0;
+        uint32_t package_rate = 0;
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        
+        if (is_connect && notify_throughput_started && notify_start_time) {
+            notify_current_time = esp_timer_get_time();
+            uint64_t elapsed_time = notify_current_time - notify_start_time;
+            
+            if (elapsed_time > 0) {
+                // Calculate byte rate (Bytes/s)
+                bit_rate = notify_sent_bytes * SECOND_TO_USECOND / elapsed_time;
+                
+                // Calculate package rate (packages/s)
+                package_rate = notify_sent_packages * SECOND_TO_USECOND / elapsed_time;
+                
+                ESP_LOGI(GATTS_TAG, "NOTIFY Throughput: %" PRIu32 " Bytes/s, %" PRIu32 " bits/s (%.2f kbps), %" PRIu32 " packages/s", 
+                         bit_rate, bit_rate * 8, (float)(bit_rate * 8) / 1000.0, package_rate);
+                ESP_LOGI(GATTS_TAG, "Total sent: %" PRIu64 " packages, %" PRIu64 " bytes, time: %.2f seconds", 
+                         notify_sent_packages, notify_sent_bytes, (float)elapsed_time / SECOND_TO_USECOND);
+                
+                /* Missing package detection info */
+                if (notify_sent_packages != uMsgIdx) {
+                    ESP_LOGW(GATTS_TAG, "Package count mismatch! Sent: %" PRIu64 ", Index: %d", 
+                             notify_sent_packages, uMsgIdx);
+                }
+            }
+        }
+    }
+}
+#endif /* #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT) */
 
 void app_main(void)
 {
@@ -733,6 +809,7 @@ void app_main(void)
     // The task is only created on the CPU core that Bluetooth is working on,
     // preventing the sending task from using the un-updated Bluetooth state on another CPU.
     xTaskCreatePinnedToCore(&throughput_server_task, "throughput_server_task", 4096, NULL, 15, NULL, BLUETOOTH_TASK_PINNED_TO_CORE);
+    xTaskCreatePinnedToCore(&notify_bitrate_calc_task, "notify_bitrate_calc_task", 4096, NULL, 14, NULL, BLUETOOTH_TASK_PINNED_TO_CORE);
 #endif
 
 #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)

@@ -52,11 +52,43 @@ static SemaphoreHandle_t gatts_semaphore;
 static bool can_send_notify = false;
 static uint8_t indicate_data[GATTS_NOTIFY_LEN] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a};
 
+/* Auto-start timer variables */
+static bool auto_start_enabled = false;
+static TickType_t connection_time = 0;
+
+/* Auto-start timer task */
+void auto_start_timer_task(void *param) {
+    while (1) {
+        if (is_connect && !auto_start_enabled) {
+            // Calculate time since connection
+            TickType_t current_time = xTaskGetTickCount();
+            TickType_t elapsed_time = current_time - connection_time;
+            
+            // Check if 2 seconds have passed since connection
+            if (elapsed_time >= (2000 / portTICK_PERIOD_MS)) {
+                // Check if still connected and not already enabled
+                if (is_connect && !can_send_notify) {
+                    ESP_LOGI(GATTS_TAG, "Auto-starting data transmission after 2s...");
+                    can_send_notify = true;
+                    auto_start_enabled = true;
+                    xSemaphoreGive(gatts_semaphore);
+                }
+            }
+        } else if (!is_connect) {
+            // Reset auto-start flag when disconnected
+            auto_start_enabled = false;
+        }
+        
+        vTaskDelay(100 / portTICK_PERIOD_MS);  // Check every 100ms
+    }
+}
+
 /* Package format variables for performance testing */
 static uint8_t bSPPZipSingleFrameFull[GATTS_NOTIFY_LEN];
 static uint16_t uPayloadSize = 0;
 static uint16_t uMsgIdx = 0;
 static uint16_t tempIndex = 0;
+static uint16_t current_mtu = 23;  // Default MTU, will be updated on MTU exchange
 
 /* Throughput calculation variables for NOTIFY mode */
 static uint64_t notify_start_time = 0;
@@ -487,7 +519,13 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         break;
     case ESP_GATTS_MTU_EVT:
         ESP_LOGI(GATTS_TAG, "MTU exchange, MTU %d", param->mtu.mtu);
-        is_connect = true;
+        current_mtu = param->mtu.mtu;  // Update current MTU
+        ESP_LOGI(GATTS_TAG, "Current package size: %d bytes, MTU: %d bytes", GATTS_NOTIFY_LEN, current_mtu);
+        if (GATTS_NOTIFY_LEN > current_mtu - 3) {  // 3 bytes overhead for notification
+            ESP_LOGW(GATTS_TAG, "Package size (%d) too large for MTU (%d)! Will use fragmentation.", GATTS_NOTIFY_LEN, current_mtu);
+        } else {
+            ESP_LOGI(GATTS_TAG, "Package size fits in MTU - no fragmentation needed");
+        }
         
 #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
         ESP_LOGI(GATTS_TAG, "NOTIFY throughput benchmark starting - Package size: %d bytes", GATTS_NOTIFY_LEN);
@@ -557,6 +595,7 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
                  param->connect.conn_id, ESP_BD_ADDR_HEX(param->connect.remote_bda));
         gl_profile_tab[PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
         is_connect = true;  // Set connection flag immediately upon connect
+        connection_time = xTaskGetTickCount(); // Store connection time
         
 #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
         ESP_LOGI(GATTS_TAG, "Connection established - ready to send data when notification enabled");
@@ -575,6 +614,8 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         notify_sent_packages = 0;
         notify_sent_bytes = 0;
         uMsgIdx = 0;
+        can_send_notify = false;  // Reset notification flag
+        auto_start_enabled = false;  // Reset auto-start flag
         ESP_LOGI(GATTS_TAG, "NOTIFY throughput variables reset for next connection");
 #endif
         
@@ -670,18 +711,39 @@ void throughput_server_task(void *param)
                             ESP_LOGI(GATTS_TAG, "NOTIFY throughput measurement started");
                         }
                         
-                        esp_ble_gatts_send_indicate(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id,
-                                                    gl_profile_tab[PROFILE_A_APP_ID].char_handle,
-                                                    tempIndex, bSPPZipSingleFrameFull, false);
-                        
-                        /* Track sent packages and bytes */
-                        notify_sent_packages++;
-                        notify_sent_bytes += tempIndex;
+                        /* Check if fragmentation is needed */
+                        uint16_t max_payload = current_mtu - 3; // 3 bytes overhead
+                        if (tempIndex <= max_payload) {
+                            // Send as single package
+                            esp_ble_gatts_send_indicate(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id,
+                                                        gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                                                        tempIndex, bSPPZipSingleFrameFull, false);
+                            notify_sent_packages++;
+                            notify_sent_bytes += tempIndex;
+                        } else {
+                            // Fragment the package
+                            uint16_t remaining = tempIndex;
+                            uint16_t offset = 0;
+                            uint16_t fragment_count = (tempIndex + max_payload - 1) / max_payload; // Round up division
+                            
+                            for (uint16_t frag = 0; frag < fragment_count; frag++) {
+                                uint16_t frag_size = (remaining > max_payload) ? max_payload : remaining;
+                                
+                                esp_ble_gatts_send_indicate(gl_profile_tab[PROFILE_A_APP_ID].gatts_if, gl_profile_tab[PROFILE_A_APP_ID].conn_id,
+                                                            gl_profile_tab[PROFILE_A_APP_ID].char_handle,
+                                                            frag_size, &bSPPZipSingleFrameFull[offset], false);
+                                
+                                offset += frag_size;
+                                remaining -= frag_size;
+                                notify_sent_bytes += frag_size;
+                            }
+                            notify_sent_packages++; // Count as one logical package
+                        }
                         
                         /* Log every 100 packages for debugging */
                         if (notify_sent_packages % 100 == 0) {
-                            ESP_LOGI(GATTS_TAG, "Sent package #%" PRIu64 ", index: %d, size: %d bytes", 
-                                     notify_sent_packages, uMsgIdx, tempIndex);
+                            ESP_LOGI(GATTS_TAG, "Sent package #%" PRIu64 ", index: %d, total bytes: %" PRIu64, 
+                                     notify_sent_packages, uMsgIdx, notify_sent_bytes);
                         }
                     }
                 } else { //Add the vTaskDelay to prevent this task from consuming the CPU all the time, causing low-priority tasks to not be executed at all.
@@ -821,6 +883,7 @@ void app_main(void)
     // preventing the sending task from using the un-updated Bluetooth state on another CPU.
     xTaskCreatePinnedToCore(&throughput_server_task, "throughput_server_task", 4096, NULL, 15, NULL, BLUETOOTH_TASK_PINNED_TO_CORE);
     xTaskCreatePinnedToCore(&notify_bitrate_calc_task, "notify_bitrate_calc_task", 4096, NULL, 14, NULL, BLUETOOTH_TASK_PINNED_TO_CORE);
+    xTaskCreatePinnedToCore(&auto_start_timer_task, "auto_start_timer_task", 2048, NULL, 13, NULL, BLUETOOTH_TASK_PINNED_TO_CORE);
 #endif
 
 #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)

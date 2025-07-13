@@ -556,6 +556,11 @@ static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_i
         ESP_LOGI(GATTS_TAG, "Connected, conn_id %d, remote "ESP_BD_ADDR_STR"",
                  param->connect.conn_id, ESP_BD_ADDR_HEX(param->connect.remote_bda));
         gl_profile_tab[PROFILE_A_APP_ID].conn_id = param->connect.conn_id;
+        is_connect = true;  // Set connection flag immediately upon connect
+        
+#if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT)
+        ESP_LOGI(GATTS_TAG, "Connection established - ready to send data when notification enabled");
+#endif
         break;
     }
     case ESP_GATTS_DISCONNECT_EVT:
@@ -630,14 +635,18 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
 void throughput_server_task(void *param)
 {
     vTaskDelay(2000 / portTICK_PERIOD_MS);
+    ESP_LOGI(GATTS_TAG, "Throughput server task started");
 
     while(1) {
         if (!can_send_notify) {
+            ESP_LOGI(GATTS_TAG, "Waiting for notification enable...");
             int res = xSemaphoreTake(gatts_semaphore, portMAX_DELAY);
             assert(res == pdTRUE);
+            ESP_LOGI(GATTS_TAG, "Notification enabled, starting to send data");
         } else {
             if (is_connect) {
                 int free_buff_num = esp_ble_get_cur_sendable_packets_num(gl_profile_tab[PROFILE_A_APP_ID].conn_id);
+                ESP_LOGI(GATTS_TAG, "is_connect=true, free_buff_num=%d", free_buff_num);
                 if(free_buff_num > 0) {
                     for( ; free_buff_num > 0; free_buff_num--) {
                         /* Add sample package */
@@ -679,6 +688,7 @@ void throughput_server_task(void *param)
                     vTaskDelay( 10 / portTICK_PERIOD_MS );
                 }
             } else {
+                ESP_LOGI(GATTS_TAG, "is_connect=false, waiting for connection...");
                  vTaskDelay(300 / portTICK_PERIOD_MS);
             }
         }

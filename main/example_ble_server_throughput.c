@@ -56,6 +56,31 @@ static uint8_t indicate_data[GATTS_NOTIFY_LEN] = {0x01, 0x02, 0x03, 0x04, 0x05, 
 static bool auto_start_enabled = false;
 static TickType_t connection_time = 0;
 
+/* Package format variables for performance testing */
+static uint8_t bSPPZipSingleFrameFull[GATTS_NOTIFY_LEN];
+static uint16_t uPayloadSize = 0;
+static uint16_t uMsgIdx = 0;
+static uint16_t tempIndex = 0;
+static uint16_t current_mtu = 23;  // Default MTU, will be updated on MTU exchange
+
+/* Throughput calculation variables for NOTIFY mode */
+static uint64_t notify_start_time = 0;
+static uint64_t notify_current_time = 0;
+static uint64_t notify_sent_packages = 0;
+static uint64_t notify_sent_bytes = 0;
+static bool notify_throughput_started = false;
+
+#endif /* #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT) */
+
+#if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)
+static bool start = false;
+static uint64_t write_len = 0;
+static uint64_t start_time = 0;
+static uint64_t current_time = 0;
+#endif /* #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT) */
+
+static bool is_connect = false;
+
 /* Auto-start timer task */
 void auto_start_timer_task(void *param) {
     while (1) {
@@ -83,30 +108,6 @@ void auto_start_timer_task(void *param) {
     }
 }
 
-/* Package format variables for performance testing */
-static uint8_t bSPPZipSingleFrameFull[GATTS_NOTIFY_LEN];
-static uint16_t uPayloadSize = 0;
-static uint16_t uMsgIdx = 0;
-static uint16_t tempIndex = 0;
-static uint16_t current_mtu = 23;  // Default MTU, will be updated on MTU exchange
-
-/* Throughput calculation variables for NOTIFY mode */
-static uint64_t notify_start_time = 0;
-static uint64_t notify_current_time = 0;
-static uint64_t notify_sent_packages = 0;
-static uint64_t notify_sent_bytes = 0;
-static bool notify_throughput_started = false;
-
-#endif /* #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT) */
-
-#if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)
-static bool start = false;
-static uint64_t write_len = 0;
-static uint64_t start_time = 0;
-static uint64_t current_time = 0;
-#endif /* #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT) */
-
-static bool is_connect = false;
 ///Declare the static function
 static void gatts_profile_a_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
 

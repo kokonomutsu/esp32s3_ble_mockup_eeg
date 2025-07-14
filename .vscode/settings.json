@@ -1,7 +1,7 @@
 {
   "idf.espIdfPath": "/Users/hdang/esp/esp-idf",
   "idf.toolsPath": "/Users/hdang/.espressif",
-  "idf.pythonInstallPath": "/Library/Frameworks/Python.framework/Versions/3.11/bin/python3",
+  "idf.pythonInstallPath": "C:\\Espressif\\tools\\idf-python\\3.11.2\\python.exe",
   "idf.flashType": "UART",
   "idf.monitorPort": "/dev/tty.usbmodem1301",
   "idf.port": "/dev/tty.usbmodem1301",

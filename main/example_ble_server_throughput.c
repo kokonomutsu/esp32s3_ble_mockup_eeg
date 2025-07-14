@@ -71,7 +71,7 @@ static uint64_t notify_sent_bytes = 0;
 static bool notify_throughput_started = false;
 
 /* Bitrate control variables */
-#define TARGET_BITRATE_KBPS 20  // Target bitrate in kbps
+#define TARGET_BITRATE_KBPS 50  // Target bitrate in kbps
 #define TARGET_BITRATE_BPS (TARGET_BITRATE_KBPS * 1000 / 8)  // Convert to bytes per second
 static uint64_t last_send_time = 0;
 

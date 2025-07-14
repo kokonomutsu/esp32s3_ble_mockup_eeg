@@ -70,6 +70,11 @@ static uint64_t notify_sent_packages = 0;
 static uint64_t notify_sent_bytes = 0;
 static bool notify_throughput_started = false;
 
+/* Bitrate control variables */
+#define TARGET_BITRATE_KBPS 20  // Target bitrate in kbps
+#define TARGET_BITRATE_BPS (TARGET_BITRATE_KBPS * 1000 / 8)  // Convert to bytes per second
+static uint64_t last_send_time = 0;
+
 #endif /* #if (CONFIG_EXAMPLE_GATTS_NOTIFY_THROUGHPUT) */
 
 #if (CONFIG_EXAMPLE_GATTC_WRITE_THROUGHPUT)
@@ -691,6 +696,18 @@ void throughput_server_task(void *param)
                 ESP_LOGI(GATTS_TAG, "is_connect=true, free_buff_num=%d", free_buff_num);
                 if(free_buff_num > 0) {
                     for( ; free_buff_num > 0; free_buff_num--) {
+                        /* Bitrate control - limit transmission rate to target bitrate */
+                        uint64_t current_time_us = esp_timer_get_time();
+                        if (last_send_time != 0) {
+                            uint64_t time_since_last = current_time_us - last_send_time;
+                            uint64_t min_interval_us = (uint64_t)GATTS_NOTIFY_LEN * SECOND_TO_USECOND / TARGET_BITRATE_BPS;
+                            
+                            if (time_since_last < min_interval_us) {
+                                uint64_t delay_us = min_interval_us - time_since_last;
+                                vTaskDelay(delay_us / (portTICK_PERIOD_MS * 1000));
+                            }
+                        }
+                        
                         /* Add sample package */
                         memset(bSPPZipSingleFrameFull, 0, sizeof(bSPPZipSingleFrameFull));
                         uMsgIdx++;
@@ -740,6 +757,9 @@ void throughput_server_task(void *param)
                             }
                             notify_sent_packages++; // Count as one logical package
                         }
+                        
+                        /* Update last send time for bitrate control */
+                        last_send_time = esp_timer_get_time();
                         
                         /* Log every 100 packages for debugging */
                         if (notify_sent_packages % 100 == 0) {
@@ -799,8 +819,8 @@ void notify_bitrate_calc_task(void *param)
                 // Calculate package rate (packages/s)
                 package_rate = notify_sent_packages * SECOND_TO_USECOND / elapsed_time;
                 
-                ESP_LOGI(GATTS_TAG, "NOTIFY Throughput: %" PRIu32 " Bytes/s, %" PRIu32 " bits/s (%.2f kbps), %" PRIu32 " packages/s", 
-                         bit_rate, bit_rate * 8, (float)(bit_rate * 8) / 1000.0, package_rate);
+                ESP_LOGI(GATTS_TAG, "NOTIFY Throughput: %" PRIu32 " Bytes/s, %" PRIu32 " bits/s (%.2f kbps), %" PRIu32 " packages/s [TARGET: %d kbps]", 
+                         bit_rate, bit_rate * 8, (float)(bit_rate * 8) / 1000.0, package_rate, TARGET_BITRATE_KBPS);
                 ESP_LOGI(GATTS_TAG, "Total sent: %" PRIu64 " packages, %" PRIu64 " bytes, time: %.2f seconds", 
                          notify_sent_packages, notify_sent_bytes, (float)elapsed_time / SECOND_TO_USECOND);
                 

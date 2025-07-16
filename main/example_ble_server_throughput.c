@@ -713,11 +713,9 @@ void throughput_server_task(void *param)
                         uMsgIdx++;
                         uPayloadSize = sizeof("---012345678901234567890123456789012345678901234567890123456789 We start test thoughput mode perfomance missing package happen or not? 987654321098765432109876543210987654321098765432109876543210---\r\n") - 1; // -1 to exclude null terminator
                         
-                        // Copy index as little-endian bytes
-                        bSPPZipSingleFrameFull[0] = (uint8_t)(uMsgIdx & 0xFF);
-                        bSPPZipSingleFrameFull[1] = (uint8_t)((uMsgIdx >> 8) & 0xFF);
-                        bSPPZipSingleFrameFull[2] = 0; // padding
-                        bSPPZipSingleFrameFull[3] = 0; // padding
+                        // Convert index to ASCII format (0000-9999 cycle)
+                        uint16_t ascii_index = uMsgIdx % 10000; // Cycle from 0000 to 9999
+                        sprintf((char*)bSPPZipSingleFrameFull, "%04d", ascii_index);
                         
                         memcpy(&bSPPZipSingleFrameFull[4], "---012345678901234567890123456789012345678901234567890123456789 We start test thoughput mode perfomance missing package happen or not? 987654321098765432109876543210987654321098765432109876543210---\r\n", uPayloadSize);
                         tempIndex = 4 + uPayloadSize; // 4 bytes for index + payload size

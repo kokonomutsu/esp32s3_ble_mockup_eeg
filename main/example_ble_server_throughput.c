@@ -71,7 +71,7 @@ static uint64_t notify_sent_bytes = 0;
 static bool notify_throughput_started = false;
 
 /* Bitrate control variables */
-#define TARGET_BITRATE_KBPS 50  // Target bitrate in kbps
+#define TARGET_BITRATE_KBPS 20  // Target bitrate in kbps
 #define TARGET_BITRATE_BPS (TARGET_BITRATE_KBPS * 1000 / 8)  // Convert to bytes per second
 static uint64_t last_send_time = 0;
 
@@ -711,11 +711,16 @@ void throughput_server_task(void *param)
                         /* Add sample package */
                         memset(bSPPZipSingleFrameFull, 0, sizeof(bSPPZipSingleFrameFull));
                         uMsgIdx++;
+                        
+                        // Wrap index from 0000 to 9999, then back to 0000
+                        if(uMsgIdx > 9999) {
+                            uMsgIdx = 0;
+                        }
+                        
                         uPayloadSize = sizeof("---012345678901234567890123456789012345678901234567890123456789 We start test thoughput mode perfomance missing package happen or not? 987654321098765432109876543210987654321098765432109876543210---\r\n") - 1; // -1 to exclude null terminator
                         
-                        // Convert index to ASCII format (0000-9999 cycle)
-                        uint16_t ascii_index = uMsgIdx % 10000; // Cycle from 0000 to 9999
-                        sprintf((char*)bSPPZipSingleFrameFull, "%04d", ascii_index);
+                        // Copy index as ASCII characters "0000" to "9999"
+                        sprintf((char*)&bSPPZipSingleFrameFull[0], "%04d", uMsgIdx);
                         
                         memcpy(&bSPPZipSingleFrameFull[4], "---012345678901234567890123456789012345678901234567890123456789 We start test thoughput mode perfomance missing package happen or not? 987654321098765432109876543210987654321098765432109876543210---\r\n", uPayloadSize);
                         tempIndex = 4 + uPayloadSize; // 4 bytes for index + payload size
